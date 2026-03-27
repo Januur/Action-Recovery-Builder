@@ -157,23 +157,32 @@ jobs:
         lunch twrp_${{ inputs.DEVICE_NAME }}-eng && make $(tr -d _ <<< ${{ inputs.BUILD_TARGET }})image -j$(nproc --all)
       working-directory: workspace
 
-    - name: List output files for debug
+    - name: Package Recovery Image
       run: |
-        echo "=== Full output folder ==="
-        find workspace/out/target/product/ 2>/dev/null | head -100
-        echo "=== Any IMG anywhere ==="
-        find workspace/ -name "*.img" 2>/dev/null
-        echo "=== Disk usage ==="
-        du -sh workspace/out/ 2>/dev/null || echo "out folder empty!"
+        OUT=workspace/out/target/product/berlna
+        echo "=== Files in OUT ==="
+        ls -la $OUT/ || echo "OUT folder missing!"
+        echo "=== Making recovery.img ==="
+        if [ -f "$OUT/recovery.img" ]; then
+          echo "recovery.img already exists!"
+        elif [ -d "$OUT/recovery" ]; then
+          cd workspace
+          source build/envsetup.sh
+          mkbootfs $OUT/recovery/root | gzip > $OUT/recovery.img
+          echo "recovery.img created successfully!"
+          ls -lh $OUT/recovery.img
+        else
+          echo "ERROR: No recovery folder found!"
+          find workspace/out/ -type f | head -50
+        fi
 
     - name: Upload to Release
       uses: softprops/action-gh-release@4634c16e79c963813287e889244c50009e7f0981
       with:
         files: |
-          workspace/out/target/product/${{ inputs.DEVICE_NAME }}/recovery.img
-          workspace/out/target/product/${{ inputs.DEVICE_NAME }}/boot.img
-          workspace/out/target/product/${{ inputs.DEVICE_NAME }}/ramdisk-recovery.cpio
-          workspace/out/target/product/${{ inputs.DEVICE_NAME }}/ramdisk.img
+          workspace/out/target/product/berlna/recovery.img
+          workspace/device/motorola/berlna/prebuilt/dtb.img
+          workspace/device/motorola/berlna/prebuilt/dtbo.img
         name: ${{ inputs.DEVICE_NAME }} (TWRP)
         tag_name: ${{ github.run_id }}
         body: |
