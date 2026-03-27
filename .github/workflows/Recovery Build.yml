@@ -28,27 +28,18 @@ on:
         required: true
         default: device/motorola/berlna
       DEVICE_NAME:
-        description: Device Name from tree (should match name on twrp_<DEVICE_NAME>.mk)
+        description: Device Name
         required: true
         default: berlna
-      REPOPICK_PATCHES:
-        description: (Optional) Gerrit commit numbers separated by a space
-        type: string
-        required: false
       BUILD_TARGET:
         type: choice
-        description: Partition containing recovery ramdisk
+        description: Build Target
         options:
         - boot
         - recovery
         - vendor_boot
         required: true
         default: recovery
-      RECOVERY_INSTALLER:
-        description: Include recovery installer zip
-        type: boolean
-        required: true
-        default: false
 
 jobs:
   build:
@@ -60,7 +51,6 @@ jobs:
         echo "Manifest Branch: ${{ inputs.MANIFEST_BRANCH }}"
         echo "Device Tree URL: ${{ inputs.DEVICE_TREE_URL }}"
         echo "Device Name: ${{ inputs.DEVICE_NAME }}"
-        echo "Build Target: ${{ inputs.BUILD_TARGET }}.img"
 
     - name: Check Out
       uses: actions/checkout@v4
@@ -84,14 +74,6 @@ jobs:
           schedtool squashfs-tools imagemagick libbz2-dev lzma ncftp \
           qemu-user-static libstdc++-10-dev android-sdk-libsparse-utils
 
-    - name: Check Build Tree
-      uses: haya14busa/action-cond@v1.2.1
-      id: buildtree
-      with:
-        cond: ${{ inputs.MANIFEST_BRANCH == '11' || inputs.MANIFEST_BRANCH == '12.1' }}
-        if_true: aosp
-        if_false: omni
-
     - name: Install repo
       run: |
         mkdir ~/bin
@@ -105,78 +87,48 @@ jobs:
         cd workspace
         git config --global user.name "${GITHUB_ACTOR}"
         git config --global user.email "${GITHUB_ACTOR_ID}+${GITHUB_ACTOR}@users.noreply.github.com"
-        repo init --depth=1 -u https://github.com/minimal-manifest-twrp/platform_manifest_twrp_${{ steps.buildtree.outputs.value }}.git -b twrp-${{ inputs.MANIFEST_BRANCH }}
+        repo init --depth=1 -u https://github.com/minimal-manifest-twrp/platform_manifest_twrp_aosp.git -b twrp-${{ inputs.MANIFEST_BRANCH }}
 
     - name: Repo Sync
       run: |
         repo sync -j$(nproc --all) --force-sync
       working-directory: workspace
 
-    - name: Create roomservice.xml
-      run: |
-        mkdir -p .repo/local_manifests
-        cp -f ${GITHUB_WORKSPACE}/templates/*.xml .repo/local_manifests/
-      working-directory: workspace
-
     - name: Clone device tree
-      if: |
-        !contains( inputs.DEVICE_TREE_URL,'/TeamWin/' )
-        && steps.buildtree.outputs.value == 'aosp'
       run: |
-        REMOTE_NAME=$(grep -oP '(?<=://).*(?=\.)' <<< ${{ inputs.DEVICE_TREE_URL }})
-        REMOTE_FETCH=$(grep -oP '(?<=://).*?(?=\/)' <<< ${{ inputs.DEVICE_TREE_URL }})
-        if [ "${REMOTE_NAME}" != "github" ]; then
-          sed -i "s%\!--remote name=\"{REMOTE_NAME}%remote name=\"${REMOTE_NAME}%g" .repo/local_manifests/roomservice.xml
-          sed -i "s%{REMOTE_FETCH}\"/-->%${REMOTE_FETCH}\"/>%g" .repo/local_manifests/roomservice.xml
-        fi
-        sed -i "s%\!--project name=\"{DEVICE_TREE_URL_REPO}%project name=\"$(grep -oP "(?<=${REMOTE_FETCH}/).*" <<< ${{ inputs.DEVICE_TREE_URL }})%g" .repo/local_manifests/roomservice.xml
-        sed -i "s%{DEVICE_PATH}%${{ inputs.DEVICE_PATH }}%g" .repo/local_manifests/roomservice.xml
-        sed -i "s%{DEVICE_REMOTE_NAME}%${REMOTE_NAME}%g" .repo/local_manifests/roomservice.xml
-        sed -i "s%{DEVICE_TREE_BRANCH}\"/-->%${{ inputs.DEVICE_TREE_BRANCH }}\"/>%g" .repo/local_manifests/roomservice.xml
-        repo sync -j$(nproc --all)
+        git clone ${{ inputs.DEVICE_TREE_URL }} -b ${{ inputs.DEVICE_TREE_BRANCH }} device/motorola/berlna
       working-directory: workspace
 
-    - name: Sync Device Dependencies
-      if: ${{ steps.buildtree.outputs.value == 'aosp' }}
-      run: |
-        source build/envsetup.sh
-        lunch twrp_${{ inputs.DEVICE_NAME }}-eng
-      working-directory: workspace
-      id: syncdevicedeps
-      continue-on-error: true
-
-    - name: Building recovery
-      if: ${{ steps.buildtree.outputs.value == 'aosp' }}
+    - name: Building TWRP
       run: |
         source build/envsetup.sh
         export ALLOW_MISSING_DEPENDENCIES=true
-        export TARGET_PREBUILT_KERNEL=device/motorola/berlna/prebuilt/kernel
-        lunch twrp_${{ inputs.DEVICE_NAME }}-eng
-        make clean
-        make $(tr -d _ <<< ${{ inputs.BUILD_TARGET }})image -j$(nproc --all)
+        export LC_ALL=C
+        export TARGET_PREBUILT_KERNEL=device/motorola/berlna/prebuilt/Image
+        lunch twrp_berlna-eng
+        make adbd bootimage -j$(nproc --all)
       working-directory: workspace
 
-    - name: Check output
+    - name: Check output files
       run: |
-        OUT=out/target/product/berlna
-        echo "=== All files in OUT ==="
-        find $OUT -maxdepth 2 -type f | head -50
-        echo "=== Size of recovery folder ==="
-        du -sh $OUT/recovery/ 2>/dev/null
+        echo "=== Output files ==="
+        find out/target/product/berlna/ -maxdepth 1 -type f | head -30
+        echo "=== IMG files anywhere ==="
+        find out/target/product/berlna/ -name "*.img" | head -20
       working-directory: workspace
 
     - name: Upload to Release
       uses: softprops/action-gh-release@4634c16e79c963813287e889244c50009e7f0981
       with:
         files: |
-          workspace/out/target/product/berlna/recovery.img
           workspace/out/target/product/berlna/boot.img
+          workspace/out/target/product/berlna/recovery.img
           workspace/device/motorola/berlna/prebuilt/dtb.img
           workspace/device/motorola/berlna/prebuilt/dtbo.img
-        name: ${{ inputs.DEVICE_NAME }} (TWRP)
+        name: berlna (TWRP)
         tag_name: ${{ github.run_id }}
         body: |
+          Motorola Edge 2021 (berlna) TWRP
           Manifest: ${{ inputs.MANIFEST_BRANCH }}
-          Target: ${{ inputs.BUILD_TARGET }}.img
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
