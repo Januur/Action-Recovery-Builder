@@ -8,50 +8,18 @@ on:
         description: Manifest Branch
         options:
         - 12.1
-        - 11
-        - 9.0
-        - 8.1
-        - 7.1
-        - 6.0
         required: true
         default: 12.1
-      DEVICE_TREE_URL:
-        description: Device Tree URL
-        required: true
-        default: https://github.com/SyberHexen/android_device_motorola_berlna-twrp
-      DEVICE_TREE_BRANCH:
-        description: Device Tree Branch
-        required: true
-        default: twrp-12.1
-      DEVICE_PATH:
-        description: Path the device tree should be synced to, relative to source root
-        required: true
-        default: device/motorola/berlna
       DEVICE_NAME:
         description: Device Name
         required: true
         default: berlna
-      BUILD_TARGET:
-        type: choice
-        description: Build Target
-        options:
-        - boot
-        - recovery
-        - vendor_boot
-        required: true
-        default: recovery
 
 jobs:
   build:
     if: github.event.repository.owner.id == github.event.sender.id
     runs-on: ubuntu-latest
     steps:
-    - name: Display Run Parameters
-      run: |
-        echo "Manifest Branch: ${{ inputs.MANIFEST_BRANCH }}"
-        echo "Device Tree URL: ${{ inputs.DEVICE_TREE_URL }}"
-        echo "Device Name: ${{ inputs.DEVICE_NAME }}"
-
     - name: Check Out
       uses: actions/checkout@v4
 
@@ -87,7 +55,7 @@ jobs:
         cd workspace
         git config --global user.name "${GITHUB_ACTOR}"
         git config --global user.email "${GITHUB_ACTOR_ID}+${GITHUB_ACTOR}@users.noreply.github.com"
-        repo init --depth=1 -u https://github.com/minimal-manifest-twrp/platform_manifest_twrp_aosp.git -b twrp-${{ inputs.MANIFEST_BRANCH }}
+        repo init --depth=1 -u https://github.com/minimal-manifest-twrp/platform_manifest_twrp_aosp.git -b twrp-12.1
 
     - name: Repo Sync
       run: |
@@ -96,7 +64,20 @@ jobs:
 
     - name: Clone device tree
       run: |
-        git clone ${{ inputs.DEVICE_TREE_URL }} -b ${{ inputs.DEVICE_TREE_BRANCH }} device/motorola/berlna
+        git clone https://github.com/SyberHexen/android_device_motorola_berlna-twrp -b twrp-12.1 device/motorola/berlna
+      working-directory: workspace
+
+    - name: Fix display driver issue
+      run: |
+        echo "Fixing display drivers for TWRP..."
+        cat >> device/motorola/berlna/BoardConfig.mk << 'EOF'
+
+# Fix black screen issue
+TARGET_RECOVERY_PIXEL_FORMAT := RGBX_8888
+RECOVERY_GRAPHICS_USE_PREBUILT_FRAMEBUFFER := true
+EOF
+        echo "Done! BoardConfig.mk updated"
+        grep -A2 "Fix black screen" device/motorola/berlna/BoardConfig.mk
       working-directory: workspace
 
     - name: Building TWRP
@@ -109,26 +90,17 @@ jobs:
         make adbd bootimage -j$(nproc --all)
       working-directory: workspace
 
-    - name: Check output files
-      run: |
-        echo "=== Output files ==="
-        find out/target/product/berlna/ -maxdepth 1 -type f | head -30
-        echo "=== IMG files anywhere ==="
-        find out/target/product/berlna/ -name "*.img" | head -20
-      working-directory: workspace
-
     - name: Upload to Release
       uses: softprops/action-gh-release@4634c16e79c963813287e889244c50009e7f0981
       with:
         files: |
           workspace/out/target/product/berlna/boot.img
-          workspace/out/target/product/berlna/recovery.img
           workspace/device/motorola/berlna/prebuilt/dtb.img
           workspace/device/motorola/berlna/prebuilt/dtbo.img
-        name: berlna (TWRP)
+        name: berlna TWRP v2
         tag_name: ${{ github.run_id }}
         body: |
           Motorola Edge 2021 (berlna) TWRP
-          Manifest: ${{ inputs.MANIFEST_BRANCH }}
+          Fixed: Display driver black screen issue
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
