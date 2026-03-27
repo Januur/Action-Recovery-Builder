@@ -69,15 +69,12 @@ jobs:
 
     - name: Fix display driver issue
       run: |
-        echo "Fixing display drivers for TWRP..."
-        cat >> device/motorola/berlna/BoardConfig.mk << 'EOF'
-
-# Fix black screen issue
-TARGET_RECOVERY_PIXEL_FORMAT := RGBX_8888
-RECOVERY_GRAPHICS_USE_PREBUILT_FRAMEBUFFER := true
-EOF
-        echo "Done! BoardConfig.mk updated"
-        grep -A2 "Fix black screen" device/motorola/berlna/BoardConfig.mk
+        echo "" >> device/motorola/berlna/BoardConfig.mk
+        echo "# Fix black screen issue" >> device/motorola/berlna/BoardConfig.mk
+        echo "TARGET_RECOVERY_PIXEL_FORMAT := RGBX_8888" >> device/motorola/berlna/BoardConfig.mk
+        echo "RECOVERY_GRAPHICS_USE_PREBUILT_FRAMEBUFFER := true" >> device/motorola/berlna/BoardConfig.mk
+        echo "Done! Last 5 lines of BoardConfig.mk:"
+        tail -5 device/motorola/berlna/BoardConfig.mk
       working-directory: workspace
 
     - name: Building TWRP
@@ -97,10 +94,10 @@ EOF
           workspace/out/target/product/berlna/boot.img
           workspace/device/motorola/berlna/prebuilt/dtb.img
           workspace/device/motorola/berlna/prebuilt/dtbo.img
-        name: berlna TWRP v2
+        name: berlna TWRP v2 Display Fix
         tag_name: ${{ github.run_id }}
         body: |
-          Motorola Edge 2021 (berlna) TWRP
-          Fixed: Display driver black screen issue
+          Motorola Edge 2021 berlna TWRP
+          Fixed display black screen issue
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
