@@ -82,8 +82,7 @@ jobs:
           libxml2-utils xsltproc bc ccache lib32readline-dev lib32z1-dev \
           liblz4-tool libncurses-dev libsdl1.2-dev libxml2 lzop pngcrush \
           schedtool squashfs-tools imagemagick libbz2-dev lzma ncftp \
-          qemu-user-static libstdc++-10-dev android-sdk-libsparse-utils \
-          mkbootimg
+          qemu-user-static libstdc++-10-dev android-sdk-libsparse-utils
 
     - name: Check Build Tree
       uses: haya14busa/action-cond@v1.2.1
@@ -151,51 +150,19 @@ jobs:
       run: |
         source build/envsetup.sh
         export ALLOW_MISSING_DEPENDENCIES=true
-        lunch twrp_${{ inputs.DEVICE_NAME }}-eng && make $(tr -d _ <<< ${{ inputs.BUILD_TARGET }})image -j$(nproc --all)
+        export TARGET_PREBUILT_KERNEL=device/motorola/berlna/prebuilt/kernel
+        lunch twrp_${{ inputs.DEVICE_NAME }}-eng
+        make clean
+        make $(tr -d _ <<< ${{ inputs.BUILD_TARGET }})image -j$(nproc --all)
       working-directory: workspace
 
-    - name: Package Recovery Image
+    - name: Check output
       run: |
         OUT=out/target/product/berlna
-        ROOT=$OUT/recovery/root
-        DTB=device/motorola/berlna/prebuilt/dtb.img
-        KERNEL=$(find $OUT -name "kernel" -o -name "Image.gz-dtb" -o -name "Image.gz" -o -name "Image" 2>/dev/null | head -1)
-
-        echo "=== Kernel found: $KERNEL ==="
-        echo "=== Root folder: ==="
-        ls $ROOT/ | head -20
-
-        echo "=== Creating ramdisk ==="
-        mkbootfs $ROOT | gzip -9 > $OUT/ramdisk-recovery.img
-        ls -lh $OUT/ramdisk-recovery.img
-
-        echo "=== Reading kernel cmdline from BoardConfig ==="
-        CMDLINE=$(grep "BOARD_KERNEL_CMDLINE" device/motorola/berlna/BoardConfig.mk | head -1 | sed 's/.*:= //')
-        PAGESIZE=$(grep "BOARD_KERNEL_PAGESIZE" device/motorola/berlna/BoardConfig.mk | head -1 | sed 's/.*:= //')
-        BASE=$(grep "BOARD_KERNEL_BASE" device/motorola/berlna/BoardConfig.mk | head -1 | sed 's/.*:= //')
-        echo "CMDLINE: $CMDLINE"
-        echo "PAGESIZE: $PAGESIZE"
-        echo "BASE: $BASE"
-
-        echo "=== Building recovery.img ==="
-        if [ -n "$KERNEL" ]; then
-          mkbootimg \
-            --kernel $KERNEL \
-            --ramdisk $OUT/ramdisk-recovery.img \
-            --cmdline "$CMDLINE" \
-            --pagesize ${PAGESIZE:-4096} \
-            --base ${BASE:-0x00000000} \
-            --kernel_offset 0x00008000 \
-            --ramdisk_offset 0x01000000 \
-            --tags_offset 0x00000100 \
-            --header_version 2 \
-            -o $OUT/recovery.img
-          echo "=== SUCCESS ==="
-          ls -lh $OUT/recovery.img
-        else
-          echo "Kernel not found! Uploading ramdisk only"
-          cp $OUT/ramdisk-recovery.img $OUT/recovery.img
-        fi
+        echo "=== All files in OUT ==="
+        find $OUT -maxdepth 2 -type f | head -50
+        echo "=== Size of recovery folder ==="
+        du -sh $OUT/recovery/ 2>/dev/null
       working-directory: workspace
 
     - name: Upload to Release
@@ -203,7 +170,7 @@ jobs:
       with:
         files: |
           workspace/out/target/product/berlna/recovery.img
-          workspace/out/target/product/berlna/ramdisk-recovery.img
+          workspace/out/target/product/berlna/boot.img
           workspace/device/motorola/berlna/prebuilt/dtb.img
           workspace/device/motorola/berlna/prebuilt/dtbo.img
         name: ${{ inputs.DEVICE_NAME }} (TWRP)
