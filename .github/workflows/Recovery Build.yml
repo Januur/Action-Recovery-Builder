@@ -57,14 +57,10 @@ jobs:
     steps:
     - name: Display Run Parameters
       run: |
-        echo "::group::User Environment Variables"
         echo "Manifest Branch: ${{ inputs.MANIFEST_BRANCH }}"
         echo "Device Tree URL: ${{ inputs.DEVICE_TREE_URL }}"
-        echo "Device Tree Branch: ${{ inputs.DEVICE_TREE_BRANCH }}"
-        echo "Device Path: ${{ inputs.DEVICE_PATH }}"
         echo "Device Name: ${{ inputs.DEVICE_NAME }}"
         echo "Build Target: ${{ inputs.BUILD_TARGET }}.img"
-        echo "::endgroup::"
 
     - name: Check Out
       uses: actions/checkout@v4
@@ -86,7 +82,8 @@ jobs:
           libxml2-utils xsltproc bc ccache lib32readline-dev lib32z1-dev \
           liblz4-tool libncurses-dev libsdl1.2-dev libxml2 lzop pngcrush \
           schedtool squashfs-tools imagemagick libbz2-dev lzma ncftp \
-          qemu-user-static libstdc++-10-dev android-sdk-libsparse-utils
+          qemu-user-static libstdc++-10-dev android-sdk-libsparse-utils \
+          mkbootimg
 
     - name: Check Build Tree
       uses: haya14busa/action-cond@v1.2.1
@@ -160,44 +157,44 @@ jobs:
     - name: Package Recovery Image
       run: |
         OUT=out/target/product/berlna
-        echo "=== Recovery folder contents ==="
-        find $OUT/recovery/ | head -30
-        echo "=== Building mkbootfs ==="
-        MKBOOTFS=$(find out/host/linux-x86/bin/mkbootfs 2>/dev/null || find out/ -name "mkbootfs" 2>/dev/null | head -1)
-        echo "mkbootfs found at: $MKBOOTFS"
-        if [ -n "$MKBOOTFS" ] && [ -d "$OUT/recovery/root" ]; then
-          echo "=== Creating ramdisk ==="
-          $MKBOOTFS $OUT/recovery/root | gzip > $OUT/ramdisk-recovery.img
-          echo "=== ramdisk-recovery.img created ==="
-          ls -lh $OUT/ramdisk-recovery.img
-          echo "=== Now building boot.img with mkbootimg ==="
-          MKBOOTIMG=$(find out/host/linux-x86/bin/mkbootimg 2>/dev/null | head -1)
-          KERNEL=$(find $OUT -name "Image*" 2>/dev/null | head -1)
-          DTB=device/motorola/berlna/prebuilt/dtb.img
-          echo "mkbootimg: $MKBOOTIMG"
-          echo "kernel: $KERNEL"
-          if [ -n "$MKBOOTIMG" ] && [ -n "$KERNEL" ]; then
-            $MKBOOTIMG \
-              --kernel $KERNEL \
-              --ramdisk $OUT/ramdisk-recovery.img \
-              --dtb $DTB \
-              --pagesize 4096 \
-              --base 0x00000000 \
-              --kernel_offset 0x00008000 \
-              --ramdisk_offset 0x01000000 \
-              --tags_offset 0x00000100 \
-              --dtb_offset 0x01f00000 \
-              --header_version 2 \
-              -o $OUT/recovery.img
-            echo "=== recovery.img created! ==="
-            ls -lh $OUT/recovery.img
-          else
-            echo "kernel or mkbootimg not found, copying ramdisk as recovery"
-            cp $OUT/ramdisk-recovery.img $OUT/recovery.img
-          fi
+        ROOT=$OUT/recovery/root
+        DTB=device/motorola/berlna/prebuilt/dtb.img
+        KERNEL=$(find $OUT -name "kernel" -o -name "Image.gz-dtb" -o -name "Image.gz" -o -name "Image" 2>/dev/null | head -1)
+
+        echo "=== Kernel found: $KERNEL ==="
+        echo "=== Root folder: ==="
+        ls $ROOT/ | head -20
+
+        echo "=== Creating ramdisk ==="
+        mkbootfs $ROOT | gzip -9 > $OUT/ramdisk-recovery.img
+        ls -lh $OUT/ramdisk-recovery.img
+
+        echo "=== Reading kernel cmdline from BoardConfig ==="
+        CMDLINE=$(grep "BOARD_KERNEL_CMDLINE" device/motorola/berlna/BoardConfig.mk | head -1 | sed 's/.*:= //')
+        PAGESIZE=$(grep "BOARD_KERNEL_PAGESIZE" device/motorola/berlna/BoardConfig.mk | head -1 | sed 's/.*:= //')
+        BASE=$(grep "BOARD_KERNEL_BASE" device/motorola/berlna/BoardConfig.mk | head -1 | sed 's/.*:= //')
+        echo "CMDLINE: $CMDLINE"
+        echo "PAGESIZE: $PAGESIZE"
+        echo "BASE: $BASE"
+
+        echo "=== Building recovery.img ==="
+        if [ -n "$KERNEL" ]; then
+          mkbootimg \
+            --kernel $KERNEL \
+            --ramdisk $OUT/ramdisk-recovery.img \
+            --cmdline "$CMDLINE" \
+            --pagesize ${PAGESIZE:-4096} \
+            --base ${BASE:-0x00000000} \
+            --kernel_offset 0x00008000 \
+            --ramdisk_offset 0x01000000 \
+            --tags_offset 0x00000100 \
+            --header_version 2 \
+            -o $OUT/recovery.img
+          echo "=== SUCCESS ==="
+          ls -lh $OUT/recovery.img
         else
-          echo "ERROR: mkbootfs or recovery/root not found!"
-          find $OUT/ -type f | head -50
+          echo "Kernel not found! Uploading ramdisk only"
+          cp $OUT/ramdisk-recovery.img $OUT/recovery.img
         fi
       working-directory: workspace
 
